@@ -182,11 +182,14 @@ local Window = Library:Window({
 	Title = "chain",
 	Suffix = ".lol",         -- renders as "chain.lol" in the top bar
 	Folder = THEME_FOLDER,   -- theme.json location (matches the ThemeManager folder)
-	Width = 640,
-	Height = 580,
+	Width = 700,
+	Height = 600,
+	MinWidth = 560,
+	MinHeight = 380,
 	TabStyle = "side",       -- side tab list, like the old window
 	TabWidth = 132,
-	Cursor = true,           -- custom cursor on by default (the old ShowCustomCursor)
+	Cursor = false,          -- custom crosshair cursor disabled by default
+	                         -- (the "Custom Cursor" toggle in UI Settings can re-enable it)
 	-- "Right" notifications are Facility's default side; a mobile toggle button is
 	-- created automatically on touch devices.
 })
@@ -787,7 +790,9 @@ local function MakeTreeSidebar(tab, groups)
 	caption.BackgroundTransparency = 1
 	caption.Text = "moves"
 	caption.TextColor3 = Library.Theme.TextDim
-	caption.FontFace = Library.Theme.FontMedium or Library.Theme.Font
+	-- NOTE: Theme.Font/FontMedium are Enum.Font values, so they go into the legacy
+	-- Font property exactly like the library's own labels (never FontFace)
+	caption.Font = Library.Theme.FontMedium or Library.Theme.Font
 	caption.TextSize = (Library.Theme.TextSize or 15) - 2
 	caption.TextXAlignment = Enum.TextXAlignment.Left
 	caption.LayoutOrder = 0
@@ -824,7 +829,7 @@ local function MakeTreeSidebar(tab, groups)
 		chevron.BackgroundTransparency = 1
 		chevron.Text = "►"
 		chevron.TextColor3 = Library.Theme.TextDim
-		chevron.FontFace = Library.Theme.Font
+		chevron.Font = Library.Theme.Font
 		chevron.TextSize = (Library.Theme.TextSize or 15) - 3
 		chevron.Rotation = 90
 		chevron.Parent = prow
@@ -837,7 +842,7 @@ local function MakeTreeSidebar(tab, groups)
 		pbtn.AutoButtonColor = false
 		pbtn.Text = group.name
 		pbtn.TextColor3 = Library.Theme.TextBright
-		pbtn.FontFace = Library.Theme.FontMedium or Library.Theme.Font
+		pbtn.Font = Library.Theme.FontMedium or Library.Theme.Font
 		pbtn.TextSize = (Library.Theme.TextSize or 15) - 1
 		pbtn.TextXAlignment = Enum.TextXAlignment.Left
 		pbtn.Parent = prow
@@ -881,7 +886,7 @@ local function MakeTreeSidebar(tab, groups)
 			cbtn.AutoButtonColor = false
 			cbtn.Text = childName
 			cbtn.TextColor3 = Library.Theme.TextDim
-			cbtn.FontFace = Library.Theme.Font
+			cbtn.Font = Library.Theme.Font
 			cbtn.TextSize = (Library.Theme.TextSize or 15) - 1
 			cbtn.TextXAlignment = Enum.TextXAlignment.Left
 			cbtn.Parent = crow
@@ -1312,7 +1317,7 @@ local ConfigGroupbox = Tabs.Config:Section("Menu", 1)
 ConfigGroupbox:Toggle({ Flag = "KeybindMenuOpen", Default = false, Text = "Open Keybind Menu",
 	Callback = function(value) Library:SetHotkeysVisible(value) end,
 })
-ConfigGroupbox:Toggle({ Flag = "ShowCustomCursor", Text = "Custom Cursor", Default = true,
+ConfigGroupbox:Toggle({ Flag = "ShowCustomCursor", Text = "Custom Cursor", Default = false,
 	Callback = function(Value) Library:SetCursor(Value) end,
 })
 ConfigGroupbox:Dropdown({ Flag = "NotificationSide", Text = "Notification Side", Options = { "Left", "Right" }, Default = "Right",
