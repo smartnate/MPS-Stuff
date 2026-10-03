@@ -22,9 +22,12 @@
   Tackle/Dribble/Save) are replicated with a nested tree sidebar - a vertical
   filtering navigation where parent categories (Attacking / Playmaking /
   Defending) expand and collapse, each child connects to its parent through
-  tree-view branch lines, and clicking a child pages that move's full-width
-  section (all theme-tracked via Library:Tag, like the library's own tab
-  buttons; mobile keeps the single "Main" reach section, like before).
+  tree-view branch lines, and clicking a child pages that move's section
+  card (section.Frame - hiding the card itself, never just its inner
+  content). All theme-tracked via Library:Tag, like the library's own tab
+  buttons; mobile keeps the single "Main" reach section, like before.
+- Ball selection is a single dropdown in the Reach "Main" band now (it used
+  to repeat inside every subtab); the reach logic reads it for every move.
 - Full-width sections ("multisections") with Split sub-columns are used for
   the Reach main controls, per-move reach pages, advanced boosts and the
   Visuals tab; secondary sliders live in Toggle:Gear() popups (Facility's
@@ -41,7 +44,13 @@
 - New, UI-only niceties that did not exist in the old script: "UI Opacity"
   (Window:SetOpacity), a server browser toggle, a live status card in Miscs,
   sidebar tab dividers, and value suffixes on millisecond sliders.
-  All game logic is untouched.
+- One font everywhere: the preview, FPS counter and booster HUD labels all
+  follow the Facility theme font and refresh on every theme repaint.
+- "Instant Shoot Swap" (toggle + hotkey + hook) was removed on request; the
+  general PowerShot tool-swap timing (Tool Swap Delay) is untouched.
+- The preview character now rebuilds automatically on respawn (the old
+  script needed a manual "Rebuild Character" press).
+  All other game logic is untouched.
 	- The old "Risky" toggle styling maps onto Facility's "danger" label style.
 	- Old toggle tooltips map onto Facility's Hint ("?" hover).
 	- SaveManager:LoadAutoloadConfig() was moved to the very END of the script so
@@ -378,46 +387,12 @@ end
 
 TrackToolEquips(Character)
 
-local InstantSwapArmed = false
-
 local function HotkeyMasterOn()
 	return Flags.EnableHotkeyBoosters == true
 end
 
-local function ClearShootState()
-	if not MainModuleTable then return end
-	pcall(function()
-		local isUsing = MainModuleTable.GetUsing and MainModuleTable.GetUsing()
-		local isWinding = MainModuleTable.GetWindStatus and MainModuleTable.GetWindStatus()
-		if isUsing or isWinding then
-			if MainModuleTable.SetUsing then MainModuleTable.SetUsing(false) end
-			if MainModuleTable.SetWindStatus then MainModuleTable.SetWindStatus(false) end
-			if MainModuleTable.ToggleDebounce then MainModuleTable.ToggleDebounce(nil, false) end
-			if MainModuleTable.FlushQueue then MainModuleTable.FlushQueue() end
-		end
-	end)
-end
-
-local function SetupInstantSwap(char)
-	char.ChildAdded:Connect(function(child)
-		if not child:IsA("Tool") then return end
-		if not IS_VEF_LIKE then return end
-		if not MainModuleTable then return end
-		if not SHOOT_TOOL_NAMES[child.Name] then return end
-
-		local shouldFire = false
-		if HotkeyMasterOn() then
-			shouldFire = InstantSwapArmed
-		else
-			shouldFire = Flags.InstantSwapChargeEnabled == true
-		end
-		if not shouldFire then return end
-
-		ClearShootState()
-	end)
-end
-
-SetupInstantSwap(Character)
+-- "Instant Shoot Swap" was removed on request; the general PowerShot swap
+-- timing (InsanePowerSwapDelay) is untouched.
 
 local function NukeBallManager()
 	if not IS_MMP then return end
@@ -667,6 +642,9 @@ ReachMainGroupbox:Split({
 		right:Slider({ Flag = "ReachVisualizerTransparency", Text = "Visualizer Transparency", Default = 0.7, Min = 0, Max = 1, Decimals = 2, Step = 0.01 })
 		right:Slider({ Flag = "ReachDebounceMs", Text = "DC (ms)", Default = 150, Min = 0, Max = 500, Decimals = 0, Suffix = " ms" })
 		right:Label("MMP only. Cooldown for Dribble_C and Pass_F.", { Style = "dim", TextSize = 11 })
+		-- ball selection applies to every move now (it used to be per-subtab)
+		right:Dropdown({ Flag = "ReachMainBallSelector", Text = "Ball Selection",
+			Options = {"Closest to character", "Furthest to character"}, Default = "Closest to character" })
 	end,
 })
 
@@ -682,8 +660,6 @@ local function CreateReachTab(TabsElement, ReachType)
 	TabsElement:Slider({ Flag = "Reach"..ReachType.."OffsetX", Text = "Offset X", Default = 0, Min = -10, Max = 10, Decimals = 1, Step = 0.1 })
 	TabsElement:Slider({ Flag = "Reach"..ReachType.."OffsetY", Text = "Offset Y", Default = 0, Min = -10, Max = 10, Decimals = 1, Step = 0.1 })
 	TabsElement:Slider({ Flag = "Reach"..ReachType.."OffsetZ", Text = "Offset Z", Default = 0, Min = -10, Max = 10, Decimals = 1, Step = 0.1 })
-	TabsElement:Dropdown({ Flag = "Reach"..ReachType.."BallSelector", Text = "Ball selection",
-		Options = {"Closest to character", "Furthest to character"}, Default = "Closest to character" })
 end
 
 -- desktop: one full-width page per move, split into toggles / sizes / offsets
@@ -694,9 +670,6 @@ local function CreateReachPage(TabsElement, ReachType)
 			toggles:Toggle({ Flag = "Reach"..ReachType.."Toggle", Text = "Enabled" })
 			toggles:Toggle({ Flag = "InfiniteReach"..ReachType.."Toggle", Text = "Infinite Reach", Style = "danger" })
 			toggles:Toggle({ Flag = "Reach"..ReachType.."CompToggle", Text = "Comp Reach" })
-			toggles:Divider()
-			toggles:Dropdown({ Flag = "Reach"..ReachType.."BallSelector", Text = "Ball selection",
-				Options = {"Closest to character", "Furthest to character"}, Default = "Closest to character" })
 		end,
 		function(sizes)
 			sizes:Slider({ Flag = "Reach"..ReachType.."SizeX", Text = "Size X", Default = 0, Min = 0, Max = 200, Decimals = 1, Step = 0.1 })
@@ -720,15 +693,24 @@ local function SelectReachPage(name)
 	ActiveReachPage = name
 	for _, page in ipairs(ReachPages) do
 		local active = page.name == name
-		-- UIListLayout only lays out visible children, so hiding a section
-		-- removes it from the column completely - true paging, no gaps
-		page.section.Container.Visible = active
+		-- page the section CARD itself (.Frame, the visible box). Hiding the
+		-- card removes it from the column completely - true paging, no gaps,
+		-- and no leftover title bars (hiding only the inner .Container would
+		-- leave every move's empty card visible)
+		page.section.Frame.Visible = active
 		-- retag so the active child keeps its colour across theme changes,
 		-- the same trick the library uses for its own tab buttons
 		Library:Tag(page.button, { TextColor3 = active and "Accent" or "TextDim" })
 		page.button.TextColor3 = active and Library.Theme.Accent or Library.Theme.TextDim
 		Library:Tag(page.bar, { BackgroundColor3 = "Accent" })
 		page.bar.BackgroundTransparency = active and 0 or 1
+		if active then
+			-- soft fade-in so page switches feel smooth instead of snapping
+			local card = page.section.Frame
+			card.BackgroundTransparency = 0.3
+			TweenService:Create(card, TweenInfo.new(0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+				{ BackgroundTransparency = 0 }):Play()
+		end
 	end
 end
 
@@ -882,6 +864,7 @@ local function MakeTreeSidebar(tab, groups)
 			local cbtn = Instance.new("TextButton")
 			cbtn.Size = UDim2.new(1, -20, 1, 0)
 			cbtn.Position = UDim2.new(0, 20, 0, 0)
+			cbtn.BackgroundColor3 = Library.Theme.Field
 			cbtn.BackgroundTransparency = 1
 			cbtn.AutoButtonColor = false
 			cbtn.Text = childName
@@ -900,15 +883,29 @@ local function MakeTreeSidebar(tab, groups)
 			bar.BackgroundTransparency = 1
 			bar.BorderSizePixel = 0
 			bar.Parent = cbtn
+			local barCorner = Instance.new("UICorner")
+			barCorner.CornerRadius = UDim.new(1, 0)
+			barCorner.Parent = bar
 			Library:Tag(bar, { BackgroundColor3 = "Accent" })
+
+			local btnCorner = Instance.new("UICorner")
+			btnCorner.CornerRadius = UDim.new(0, 4)
+			btnCorner.Parent = cbtn
+			Library:Tag(cbtn, { BackgroundColor3 = "Field", TextColor3 = "TextDim" })
 
 			cbtn.Activated:Connect(function()
 				SelectReachPage(childName)
 			end)
 			cbtn.MouseEnter:Connect(function()
+				TweenService:Create(cbtn,
+					TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+					{ BackgroundTransparency = 0.82 }):Play()
 				if ActiveReachPage ~= childName then cbtn.TextColor3 = Library.Theme.Text end
 			end)
 			cbtn.MouseLeave:Connect(function()
+				TweenService:Create(cbtn,
+					TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+					{ BackgroundTransparency = 1 }):Play()
 				if ActiveReachPage ~= childName then cbtn.TextColor3 = Library.Theme.TextDim end
 			end)
 
@@ -924,7 +921,9 @@ local function MakeTreeSidebar(tab, groups)
 
 		pbtn.Activated:Connect(function()
 			parent.expanded = not parent.expanded
-			chevron.Rotation = parent.expanded and 90 or 0
+			TweenService:Create(chevron,
+				TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+				{ Rotation = parent.expanded and 90 or 0 }):Play()
 			for _, r in ipairs(parent.rows) do
 				r.Visible = parent.expanded
 			end
@@ -957,8 +956,8 @@ else
 	}
 	for _, entry in ipairs(ReachPages) do
 		entry.section = ReachSections[entry.name]
-		-- reparent the move sections into the sidebar's page area
-		entry.section.Container.Parent = ReachPageColumn
+		-- reparent the move section CARDS into the sidebar's page area
+		entry.section.Frame.Parent = ReachPageColumn
 	end
 	SelectReachPage("Shoot")
 end
@@ -996,13 +995,6 @@ if not UserInputService.TouchEnabled then
 		panel:Slider({ Flag = "InsanePowerMaxVel", Text = "Max Velocity Cap", Default = 300, Min = 100, Max = 1000, Decimals = 0 })
 		panel:Slider({ Flag = "InsanePowerSwapDelay", Text = "Tool Swap Delay (ms)", Default = 500, Min = 0, Max = 2000, Decimals = 0 })
 	end)
-
-	PowerShotBox:Toggle({
-		Flag = "InstantSwapChargeEnabled",
-		Text = "Instant Shoot Swap",
-		Default = false,
-		Hint = "Removes charge delay when switching to a shoot-family tool. Overridden by hotkey if enabled.",
-	})
 
 	if not IS_MMP then
 		local KnuckleApi = PowerShotBox:Toggle({ Flag = "ForceKnuckleToggle", Text = "Force Knuckleball", Default = false })
@@ -1064,43 +1056,46 @@ if not UserInputService.TouchEnabled then
 	})
 
 	if not IS_MMP then
-		local HotkeyBox = Tabs.Character:Section("Hotkey Boosters", 1)
+		local HotkeyBox = Tabs.Character:Section("Hotkey Boosters", "full")
 		HotkeyBox:Toggle({
 			Flag = "EnableHotkeyBoosters",
 			Text = "Enable Hotkey Boosters",
 			Hint = "When ON, boosters only fire if you press their hotkey while charging a shot. When OFF, boosters use their normal toggles above.",
 			Default = false,
 		})
-		HotkeyBox:Divider()
-
-		HotkeyBox:Keybind({ Flag = "PowerShotHotkey", Text = "PowerShot", Default = "V" })
-		HotkeyBox:Keybind({ Flag = "CurveHotkey", Text = "Curve Boost", Default = "X" })
-		HotkeyBox:Keybind({ Flag = "KnuckleHotkey", Text = "Force Knuckleball", Default = "G" })
-		HotkeyBox:Keybind({ Flag = "SpinRotHotkey", Text = "Spin Rotation", Default = "B" })
-		HotkeyBox:Keybind({ Flag = "InstantSwapHotkey", Text = "Instant Shoot Swap", Default = "H" })
-
-		HotkeyBox:Divider()
-		HotkeyBox:Toggle({
-			Flag = "KnuckleAutoPowerShot",
-			Text = "Knuckleball → auto-arm PowerShot",
-			Hint = "When ON, pressing the knuckleball hotkey also arms PowerShot for that shot.",
-			Default = true,
+		HotkeyBox:Split({
+			function(keys)
+				keys:Divider()
+				keys:Keybind({ Flag = "PowerShotHotkey", Text = "PowerShot", Default = "V" })
+				keys:Keybind({ Flag = "CurveHotkey", Text = "Curve Boost", Default = "X" })
+				keys:Keybind({ Flag = "KnuckleHotkey", Text = "Force Knuckleball", Default = "G" })
+				keys:Keybind({ Flag = "SpinRotHotkey", Text = "Spin Rotation", Default = "B" })
+			end,
+			function(auto)
+				auto:Toggle({
+					Flag = "KnuckleAutoPowerShot",
+					Text = "Knuckleball → auto-arm PowerShot",
+					Hint = "When ON, pressing the knuckleball hotkey also arms PowerShot for that shot.",
+					Default = true,
+				})
+				auto:Toggle({
+					Flag = "PowerShotAutoCurve",
+					Text = "PowerShot → auto-arm Curve",
+					Hint = "When ON, pressing the PowerShot hotkey also arms Curve Boost for that shot.",
+					Default = false,
+				})
+				auto:Divider()
+				auto:Toggle({
+					Flag = "HotkeyClearEnabled",
+					Text = "Panic Clear Hotkey",
+					Hint = "Disarms all boosters instantly.",
+					Default = true,
+				})
+				-- standalone keybind row: pressing the key must NOT flip the toggle itself
+				-- (the old picker used Mode = "Always" and is handled manually further below)
+				auto:Keybind({ Flag = "HotkeyClearKey", Text = "Clear All", Default = "Backspace" })
+			end,
 		})
-		HotkeyBox:Toggle({
-			Flag = "PowerShotAutoCurve",
-			Text = "PowerShot → auto-arm Curve",
-			Hint = "When ON, pressing the PowerShot hotkey also arms Curve Boost for that shot.",
-			Default = false,
-		})
-		HotkeyBox:Toggle({
-			Flag = "HotkeyClearEnabled",
-			Text = "Panic Clear Hotkey",
-			Hint = "Disarms all boosters instantly.",
-			Default = true,
-		})
-		-- standalone keybind row: pressing the key must NOT flip the toggle itself
-		-- (the old picker used Mode = "Always" and is handled manually further below)
-		HotkeyBox:Keybind({ Flag = "HotkeyClearKey", Text = "Clear All", Default = "Backspace" })
 	end
 end
 
@@ -1108,15 +1103,20 @@ end
 -- Ball
 -- ===========================================================================
 
-local BallPredictionGroupbox = Tabs.Ball:Section("Main", 1)
-
-local BallPredToggleApi = BallPredictionGroupbox:Toggle({ Flag = "BallPredToggle", Text = "Ball Prediction", Default = false })
-BallPredToggleApi:ColorPicker({ Flag = "BallPredTrailColor", Default = Color3.new(1, 1, 1), DefaultAlpha = 1 })
-UI.BallPredTrailColor = BallPredToggleApi.Pickers[1]
-BallPredictionGroupbox:Slider({ Flag = "BallPredTrailSize", Text = "Trail Size", Default = 0.1, Min = 0.01, Max = 0.5, Decimals = 2, Step = 0.01 })
-BallPredictionGroupbox:Slider({ Flag = "BallPredHZ", Text = "Refresh Rate", Default = 0.1, Min = 0.05, Max = 1, Decimals = 2, Step = 0.01 })
-BallPredictionGroupbox:Slider({ Flag = "BallPredThreshold", Text = "Prediction Threshold", Default = 25, Min = 0, Max = 100, Decimals = 0 })
-BallPredictionGroupbox:Slider({ Flag = "BallPredAccuracy", Text = "Prediction Accuracy", Default = 5, Min = 1, Max = 10, Decimals = 0 })
+local BallPredictionGroupbox = Tabs.Ball:Section("Main", "full")
+BallPredictionGroupbox:Split({
+	function(left)
+		local BallPredToggleApi = left:Toggle({ Flag = "BallPredToggle", Text = "Ball Prediction", Default = false })
+		BallPredToggleApi:ColorPicker({ Flag = "BallPredTrailColor", Default = Color3.new(1, 1, 1), DefaultAlpha = 1 })
+		UI.BallPredTrailColor = BallPredToggleApi.Pickers[1]
+		left:Slider({ Flag = "BallPredTrailSize", Text = "Trail Size", Default = 0.1, Min = 0.01, Max = 0.5, Decimals = 2, Step = 0.01 })
+	end,
+	function(right)
+		right:Slider({ Flag = "BallPredHZ", Text = "Refresh Rate", Default = 0.1, Min = 0.05, Max = 1, Decimals = 2, Step = 0.01 })
+		right:Slider({ Flag = "BallPredThreshold", Text = "Prediction Threshold", Default = 25, Min = 0, Max = 100, Decimals = 0 })
+		right:Slider({ Flag = "BallPredAccuracy", Text = "Prediction Accuracy", Default = 5, Min = 1, Max = 10, Decimals = 0 })
+	end,
+})
 
 -- ===========================================================================
 -- Visuals
@@ -1246,6 +1246,7 @@ PreviewSettingsBox:Toggle({ Flag = "PreviewAutoRotate", Text = "Auto Rotate", De
 Cb.PreviewMatchUIFont = { Flag = "PreviewMatchUIFont", Text = "Match UI Font", Default = true }
 PreviewSettingsBox:Toggle(Cb.PreviewMatchUIFont)
 PreviewSettingsBox:Toggle({ Flag = "PreviewHideWithMenu", Text = "Hide With Menu", Default = true })
+PreviewSettingsBox:Dropdown({ Flag = "PreviewPoseMode", Text = "Pose Mode", Options = {"Live", "Idle"}, Default = "Live" })
 PreviewSettingsBox:Slider({ Flag = "PreviewRotSpeed", Text = "Rotation Speed", Default = 0.5, Min = 0, Max = 3, Decimals = 2, Step = 0.01 })
 Cb.PreviewSize = { Flag = "PreviewSize", Text = "Window Size", Default = 260, Min = 180, Max = 500, Decimals = 0 }
 PreviewSettingsBox:Slider(Cb.PreviewSize)
@@ -1259,15 +1260,21 @@ PreviewESPBox:Toggle(Cb.PreviewShowName)
 Cb.PreviewShowTool = { Flag = "PreviewShowTool", Text = "Show Tool", Default = true }
 PreviewESPBox:Toggle(Cb.PreviewShowTool)
 
-local PreviewColorsBox = Tabs.Preview:Section("Colors", 1)
+local PreviewColorsBox = Tabs.Preview:Section("Colors", "full")
 Cb.PreviewNameColor = { Flag = "PreviewNameColor", Text = "Name Color", Default = Color3.fromRGB(255, 255, 255) }
-PreviewColorsBox:ColorPicker(Cb.PreviewNameColor)
 Cb.PreviewToolColor = { Flag = "PreviewToolColor", Text = "Tool Color", Default = Color3.fromRGB(255, 255, 255) }
-PreviewColorsBox:ColorPicker(Cb.PreviewToolColor)
 Cb.PreviewReachColor = { Flag = "PreviewReachColor", Text = "Reach Preview Color", Default = Color3.fromRGB(219, 68, 103) }
-PreviewColorsBox:ColorPicker(Cb.PreviewReachColor)
 Cb.PreviewBGColor = { Flag = "PreviewBGColor", Text = "Background Color", Default = Color3.fromRGB(21, 21, 21) }
-PreviewColorsBox:ColorPicker(Cb.PreviewBGColor)
+PreviewColorsBox:Split({
+	function(left)
+		left:ColorPicker(Cb.PreviewNameColor)
+		left:ColorPicker(Cb.PreviewReachColor)
+	end,
+	function(right)
+		right:ColorPicker(Cb.PreviewToolColor)
+		right:ColorPicker(Cb.PreviewBGColor)
+	end,
+})
 
 -- ===========================================================================
 -- Miscs
@@ -1521,6 +1528,14 @@ task.spawn(function()
 	end
 end)
 
+local JuraFont = Font.new("rbxasset://fonts/families/Jura.json", Enum.FontWeight.Medium)
+local CodeFont = Font.new("rbxasset://fonts/families/RobotoMono.json", Enum.FontWeight.Regular)
+-- one font everywhere: custom HUD/preview text follows the Facility theme font
+local MatchFontOk, MatchFontResult = pcall(function()
+	return Font.fromEnum(Library.Theme.Font or Enum.Font.Gotham)
+end)
+local MatchFont = MatchFontOk and MatchFontResult or JuraFont
+
 local FPSLabel = nil
 local function BuildFPSLabel()
 	if FPSLabel then return end
@@ -1532,7 +1547,7 @@ local function BuildFPSLabel()
 	FPSLabel.BackgroundTransparency = 0.5
 	FPSLabel.BorderSizePixel = 0
 	FPSLabel.TextColor3 = UI.FPSCounterColor and UI.FPSCounterColor.Color or Color3.new(1,1,1)
-	FPSLabel.Font = Enum.Font.Code
+	FPSLabel.FontFace = MatchFont
 	FPSLabel.TextSize = Flags.FPSCounterSize or 18
 	FPSLabel.Text = "FPS: 0"
 	FPSLabel.TextXAlignment = Enum.TextXAlignment.Center
@@ -1628,7 +1643,6 @@ local ArmedBoosters = {
 }
 local function ClearArmedBoosters()
 	for k in pairs(ArmedBoosters) do ArmedBoosters[k] = false end
-	InstantSwapArmed = false
 end
 
 local function IsCharging()
@@ -1647,7 +1661,7 @@ end
 local BoosterHudGui = nil
 local BoosterHudScreen = nil
 local BoosterLabels = {}
-local LabelOrder = {"PowerShot", "Curve", "Knuckle", "SpinRot", "InstantSwap"}
+local LabelOrder = {"PowerShot", "Curve", "Knuckle", "SpinRot"}
 
 local function EnsureBoosterHud()
 	if BoosterHudGui and BoosterHudGui.Parent and BoosterHudScreen and BoosterHudScreen.Parent then
@@ -1705,7 +1719,7 @@ local function CreateLabelFrame(boosterName, initialText, textColor, autoHideAft
 	text.Text = initialText
 	text.TextColor3 = textColor
 	text.TextTransparency = 1
-	text.FontFace = Font.new("rbxasset://fonts/families/Jura.json", Enum.FontWeight.Medium)
+	text.FontFace = MatchFont
 	text.TextSize = 15
 	text.TextXAlignment = Enum.TextXAlignment.Center
 	text.LayoutOrder = table.find(LabelOrder, boosterName) or 99
@@ -1836,7 +1850,6 @@ local BOOSTER_DISPLAY = {
 	Curve = "Curve",
 	Knuckle = "Knuckleball",
 	SpinRot = "Spin Rotation",
-	InstantSwap = "Instant Swap",
 }
 
 local function ArmBooster(name)
@@ -1872,20 +1885,7 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 		for n in pairs(ArmedBoosters) do
 			if ArmedBoosters[n] then DisarmBooster(n) end
 		end
-		if InstantSwapArmed then
-			InstantSwapArmed = false
-			ShowRemoved("InstantSwap", "Instant Swap")
-		end
 		return
-	end
-
-	if Flags.InstantSwapHotkey and key == Flags.InstantSwapHotkey then
-		InstantSwapArmed = not InstantSwapArmed
-		if InstantSwapArmed then
-			ShowApplied("InstantSwap", "Instant Swap")
-		else
-			ShowRemoved("InstantSwap", "Instant Swap")
-		end
 	end
 
 	if not IsCharging() then return end
@@ -1937,13 +1937,6 @@ local function ShouldBoosterFire(boosterName, enableFlag)
 	end
 end
 
-local JuraFont = Font.new("rbxasset://fonts/families/Jura.json", Enum.FontWeight.Medium)
-local CodeFont = Font.new("rbxasset://fonts/families/RobotoMono.json", Enum.FontWeight.Regular)
--- "Match UI Font" now matches the Facility window font (the old UI used Jura)
-local MatchFontOk, MatchFontResult = pcall(function()
-	return Font.fromEnum(Library.Theme.Font or Enum.Font.Gotham)
-end)
-local MatchFont = MatchFontOk and MatchFontResult or JuraFont
 
 -- ===== PREVIEW PANEL ======================================================
 -- The character/tool preview is hosted in a Library:Panel - Facility's own
@@ -2034,15 +2027,10 @@ ToolLabel.TextStrokeTransparency = 0
 ToolLabel.FontFace = JuraFont
 ToolLabel.TextSize = 13
 
--- zoom + pose mode now live inside the panel, right under the viewport
-PreviewPanel.Content:Split({
-	function(left)
-		left:Slider({ Flag = "PreviewZoom", Text = "Zoom", Default = 8, Min = 4, Max = 20, Decimals = 1, Step = 0.1 })
-	end,
-	function(right)
-		right:Dropdown({ Flag = "PreviewPoseMode", Text = "Pose Mode", Options = {"Live", "Idle"}, Default = "Live" })
-	end,
-})
+-- zoom lives right under the viewport it controls; Pose Mode is a dropdown
+-- and sits in the Preview tab (dropdown popups inside floating panels are
+-- unreliable - the popup layer belongs to the main window)
+PreviewPanel.Content:Slider({ Flag = "PreviewZoom", Text = "Zoom", Default = 8, Min = 4, Max = 20, Decimals = 1, Step = 0.1 })
 PreviewPanel.Content:Button({ Text = "hide preview", Callback = function()
 	if UI.PreviewEnabled then UI.PreviewEnabled:Set(false) end
 end })
@@ -2102,6 +2090,11 @@ local function BuildPreviewChar()
 end
 _G.BuildPreviewChar = BuildPreviewChar
 task.delay(1, BuildPreviewChar)
+-- keep the preview in sync across respawns (the old script needed a manual
+-- "Rebuild Character" press after every respawn)
+LocalPlayer.CharacterAdded:Connect(function()
+	task.delay(1.5, BuildPreviewChar)
+end)
 
 local rotationAngle = 0
 local function UpdateFonts()
@@ -2136,6 +2129,24 @@ Cb.PreviewBGColor.Callback = function(color) ViewportFrame.BackgroundColor3 = co
 UpdateESPVisibility()
 UpdateFonts()
 UpdateSize()
+
+-- when the theme changes (paintbrush editor, ThemeManager:Apply, ...), keep
+-- the shared font fresh and re-apply it to every custom label, so the whole
+-- UI - window, tree sidebar, preview and HUD - always shares one font
+do
+	local baseRepaint = Library.Repaint
+	Library.Repaint = function(self, ...)
+		baseRepaint(self, ...)
+		local okFont, themeFont = pcall(Font.fromEnum, Library.Theme.Font or Enum.Font.Gotham)
+		if okFont and themeFont then
+			MatchFont = themeFont
+		end
+		pcall(UpdateFonts)
+		pcall(function()
+			if FPSLabel then FPSLabel.FontFace = MatchFont end
+		end)
+	end
+end
 
 local previewAccum = 0
 local PREVIEW_INTERVAL = 1/60
@@ -2470,7 +2481,10 @@ RunService.RenderStepped:Connect(function()
             TouchingBalls = workspace:GetPartsInPart(ReachBox, ReachOverlapParams)
         end
         local hrpPos = HRP.Position
-        local selector = (ReachType and Flags["Reach"..ReachType.."BallSelector"]) or "Closest to character"
+        -- ball selection lives in the Main reach section now (one dropdown for every move)
+        local selector = Flags.ReachMainBallSelector
+        or (ReachType and Flags["Reach"..ReachType.."BallSelector"])
+        or "Closest to character"
         if selector == "Furthest to character" then
             table.sort(TouchingBalls, function(a, b) return (a.Position - hrpPos).Magnitude > (b.Position - hrpPos).Magnitude end)
         else
@@ -2793,9 +2807,7 @@ LocalPlayer.CharacterAdded:Connect(function(NewCharacter)
 	end
 	PowerShotHooked = false
 	LastToolEquipTime = tick()
-	InstantSwapArmed = false
 	TrackToolEquips(NewCharacter)
-	SetupInstantSwap(NewCharacter)
 	BoosterHudGui = nil
 	ClearAllLabels()
 	ClearArmedBoosters()
