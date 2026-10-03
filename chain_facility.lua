@@ -50,6 +50,9 @@
   general PowerShot tool-swap timing (Tool Swap Delay) is untouched.
 - The preview character now rebuilds automatically on respawn (the old
   script needed a manual "Rebuild Character" press).
+- The B3rnyGuard namecall bypass (B3rnyGuardian report swallow +
+  GetClosestPointOnSurface passthrough) is now a toggle, "B3rnyGuard Bypass"
+  in Miscs -> Utility, saved with configs like everything else.
   All other game logic is untouched.
 	- The old "Risky" toggle styling maps onto Facility's "danger" label style.
 	- Old toggle tooltips map onto Facility's Hint ("?" hover).
@@ -1288,6 +1291,12 @@ PingSpoofGroupbox:Slider({ Flag = "PingSpoofSpike", Text = "Ping Spike", Default
 PingSpoofGroupbox:Slider({ Flag = "PingSpoofHZ", Text = "Ping Refresh Rate", Default = 1, Min = 0.1, Max = 5, Decimals = 1, Step = 0.1 })
 
 local UtilGroupbox = Tabs.Miscs:Section("Utility", 1)
+UtilGroupbox:Toggle({
+	Flag = "B3rnyGuardBypass",
+	Text = "B3rnyGuard Bypass",
+	Default = true,
+	Hint = "Blocks the game's B3rnyGuardian anti-cheat report and forces hit-distance validation (GetClosestPointOnSurface) to always pass.",
+})
 UtilGroupbox:Toggle({ Flag = "AntiAFKToggle", Text = "Anti AFK", Default = true })
 UtilGroupbox:Toggle({ Flag = "AutoRejoinOnErrorToggle", Text = "Auto Rejoin on Kick", Default = false })
 
@@ -2232,17 +2241,23 @@ local function ApplyBypass()
 end
 pcall(ApplyBypass)
 
+-- B3rnyGuard bypass (namecall hook): swallows the game's "B3rnyGuardian"
+-- anti-cheat report on MainEvent and forces GetClosestPointOnSurface to
+-- return the queried point, so hit-distance validation always passes.
+-- Gated live by the "B3rnyGuard Bypass" toggle in Miscs -> Utility.
 pcall(function()
 	local old_namecall
 	old_namecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
 		local method = getnamecallmethod()
 		if not checkcaller() then
-			if method == "FireServer" and self.Name == "MainEvent" then
-				local arg1 = (select(1, ...))
-				if arg1 == "B3rnyGuardian" then return nil end
-			end
-			if method == "GetClosestPointOnSurface" then
-				return (select(1, ...))
+			if Flags.B3rnyGuardBypass ~= false then
+				if method == "FireServer" and self.Name == "MainEvent" then
+					local arg1 = (select(1, ...))
+					if arg1 == "B3rnyGuardian" then return nil end
+				end
+				if method == "GetClosestPointOnSurface" then
+					return (select(1, ...))
+				end
 			end
 		end
 		return old_namecall(self, ...)
