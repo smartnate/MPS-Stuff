@@ -19,10 +19,12 @@
 	  change (user interaction or programmatic :Set()).
 	- Old :SetValue() / :SetValueRGB() -> element api :Set() through the UI table.
 - Facility has no tabbox subtabs: the six Reach subtabs (Shoot/Pass/Long/
-  Tackle/Dribble/Save) are replicated with a Facility-style segmented strip
-  above the move pages (theme-tracked via Library:Tag, like the library's own
-  tab buttons) that pages full-width sections by toggling their Container
-  visibility (mobile keeps the single "Main" reach section, like before).
+  Tackle/Dribble/Save) are replicated with a nested tree sidebar - a vertical
+  filtering navigation where parent categories (Attacking / Playmaking /
+  Defending) expand and collapse, each child connects to its parent through
+  tree-view branch lines, and clicking a child pages that move's full-width
+  section (all theme-tracked via Library:Tag, like the library's own tab
+  buttons; mobile keeps the single "Main" reach section, like before).
 - Full-width sections ("multisections") with Split sub-columns are used for
   the Reach main controls, per-move reach pages, advanced boosts and the
   Visuals tab; secondary sliders live in Toggle:Gear() popups (Facility's
@@ -708,93 +710,235 @@ local function CreateReachPage(TabsElement, ReachType)
 end
 
 local ReachPages = {}
-local ReachStripButtons = {}
+local ReachTreeParents = {}
 local ActiveReachPage = nil
 
 local function SelectReachPage(name)
 	ActiveReachPage = name
 	for _, page in ipairs(ReachPages) do
+		local active = page.name == name
 		-- UIListLayout only lays out visible children, so hiding a section
 		-- removes it from the column completely - true paging, no gaps
-		page.section.Container.Visible = (page.name == name)
-	end
-	for _, button in ipairs(ReachStripButtons) do
-		local active = button.page == name
-		-- retag so the active pill keeps its colour across theme changes,
+		page.section.Container.Visible = active
+		-- retag so the active child keeps its colour across theme changes,
 		-- the same trick the library uses for its own tab buttons
-		Library:Tag(button.instance, { BackgroundColor3 = "Field", TextColor3 = active and "Accent" or "TextDim" })
-		Library:Tag(button.stroke, { Color = active and "Accent" or "Border" })
-		button.instance.TextColor3 = active and Library.Theme.Accent or Library.Theme.TextDim
-		button.stroke.Color = active and Library.Theme.Accent or Library.Theme.Border
+		Library:Tag(page.button, { TextColor3 = active and "Accent" or "TextDim" })
+		page.button.TextColor3 = active and Library.Theme.Accent or Library.Theme.TextDim
+		Library:Tag(page.bar, { BackgroundColor3 = "Accent" })
+		page.bar.BackgroundTransparency = active and 0 or 1
 	end
 end
 
--- segmented subtab strip: a row of library-styled buttons parented into the
--- tab's page, right between the Main band and the move pages
-local function MakeSubtabStrip(tab, pages)
-	local strip = Instance.new("Frame")
-	strip.Name = "SubtabStrip"
-	strip.Size = UDim2.new(1, 0, 0, 26)
-	strip.BackgroundTransparency = 1
-	strip.LayoutOrder = tab.Order + 1
+-- Nested Tree Sidebar Subtabs: a vertical sub-category navigation inside the
+-- tab. Parent groups expand and collapse via a chevron, every child (the old
+-- subtabs) is connected to its parent by tree-view branch lines, and clicking
+-- a child filters the page area to that move's section. Styled entirely from
+-- the live theme so it repaints together with the rest of the UI.
+local function MakeTreeSidebar(tab, groups)
+	-- row that holds the sidebar card and the page area side by side
+	local row = Instance.new("Frame")
+	row.Name = "ReachTreeRow"
+	row.Size = UDim2.new(1, 0, 0, 0)
+	row.AutomaticSize = Enum.AutomaticSize.Y
+	row.BackgroundTransparency = 1
+	row.LayoutOrder = tab.Order + 1
 	tab.Order = tab.Order + 1
-	strip.Parent = tab.Page
+	row.Parent = tab.Page
 
-	local list = Instance.new("UIListLayout")
-	list.FillDirection = Enum.FillDirection.Horizontal
-	list.HorizontalAlignment = Enum.HorizontalAlignment.Left
-	list.SortOrder = Enum.SortOrder.LayoutOrder
-	list.Padding = UDim.new(0, 6)
-	list.Parent = strip
+	local rowList = Instance.new("UIListLayout")
+	rowList.FillDirection = Enum.FillDirection.Horizontal
+	rowList.SortOrder = Enum.SortOrder.LayoutOrder
+	rowList.Padding = UDim.new(0, 12)
+	rowList.Parent = row
 
-	local count = #pages
-	for index, page in ipairs(pages) do
-		local button = Instance.new("TextButton")
-		button.Name = page.name
-		button.Size = UDim2.new(1 / count, -(6 * (count - 1)) / count, 1, 0)
-		button.BackgroundColor3 = Library.Theme.Field
-		button.AutoButtonColor = false
-		button.BorderSizePixel = 0
-		button.Text = page.name
-		button.FontFace = Library.Theme.FontMedium or Library.Theme.Font
-		button.TextSize = (Library.Theme.TextSize or 15) - 1
-		button.TextColor3 = Library.Theme.TextDim
-		button.LayoutOrder = index
-		button.Parent = strip
+	-- the sidebar card itself
+	local sidebar = Instance.new("Frame")
+	sidebar.Name = "ReachTree"
+	sidebar.Size = UDim2.new(0, 158, 0, 0)
+	sidebar.AutomaticSize = Enum.AutomaticSize.Y
+	sidebar.BackgroundColor3 = Library.Theme.Section
+	sidebar.BorderSizePixel = 0
+	sidebar.LayoutOrder = 1
+	sidebar.Parent = row
+	Library:Tag(sidebar, { BackgroundColor3 = "Section" })
 
-		local corner = Instance.new("UICorner")
-		corner.CornerRadius = UDim.new(0, 5)
-		corner.Parent = button
-		local stroke = Instance.new("UIStroke")
-		stroke.Thickness = 1
-		stroke.Parent = button
+	local sidebarCorner = Instance.new("UICorner")
+	sidebarCorner.CornerRadius = UDim.new(0, 6)
+	sidebarCorner.Parent = sidebar
+	local sidebarStroke = Instance.new("UIStroke")
+	sidebarStroke.Thickness = 1
+	sidebarStroke.Parent = sidebar
+	Library:Tag(sidebarStroke, { Color = "Border" })
 
-		ReachStripButtons[#ReachStripButtons + 1] = { page = page.name, instance = button, stroke = stroke }
+	local sidebarPad = Instance.new("UIPadding")
+	sidebarPad.PaddingTop = UDim.new(0, 8)
+	sidebarPad.PaddingBottom = UDim.new(0, 6)
+	sidebarPad.PaddingLeft = UDim.new(0, 8)
+	sidebarPad.PaddingRight = UDim.new(0, 8)
+	sidebarPad.Parent = sidebar
 
-		button.Activated:Connect(function()
-			SelectReachPage(page.name)
-		end)
-		button.MouseEnter:Connect(function()
-			if page.name ~= ActiveReachPage then
-				button.TextColor3 = Library.Theme.Text
+	local sideList = Instance.new("UIListLayout")
+	sideList.SortOrder = Enum.SortOrder.LayoutOrder
+	sideList.Padding = UDim.new(0, 1)
+	sideList.Parent = sidebar
+
+	local caption = Instance.new("TextLabel")
+	caption.Size = UDim2.new(1, 0, 0, 20)
+	caption.BackgroundTransparency = 1
+	caption.Text = "moves"
+	caption.TextColor3 = Library.Theme.TextDim
+	caption.FontFace = Library.Theme.FontMedium or Library.Theme.Font
+	caption.TextSize = (Library.Theme.TextSize or 15) - 2
+	caption.TextXAlignment = Enum.TextXAlignment.Left
+	caption.LayoutOrder = 0
+	caption.Parent = sidebar
+	Library:Tag(caption, { TextColor3 = "TextDim" })
+
+	-- the page area the move sections get moved into
+	local contentCol = Instance.new("Frame")
+	contentCol.Name = "ReachPages"
+	contentCol.Size = UDim2.new(1, -170, 0, 0)
+	contentCol.AutomaticSize = Enum.AutomaticSize.Y
+	contentCol.BackgroundTransparency = 1
+	contentCol.LayoutOrder = 2
+	contentCol.Parent = row
+
+	local colList = Instance.new("UIListLayout")
+	colList.SortOrder = Enum.SortOrder.LayoutOrder
+	colList.Padding = UDim.new(0, 14)
+	colList.Parent = contentCol
+
+	local order = 1
+	for _, group in ipairs(groups) do
+		local parent = { name = group.name, expanded = true, rows = {} }
+
+		-- parent row: chevron + category label
+		local prow = Instance.new("Frame")
+		prow.Size = UDim2.new(1, 0, 0, 26)
+		prow.BackgroundTransparency = 1
+		prow.LayoutOrder = order; order += 1
+		prow.Parent = sidebar
+
+		local chevron = Instance.new("TextLabel")
+		chevron.Size = UDim2.new(0, 14, 1, 0)
+		chevron.BackgroundTransparency = 1
+		chevron.Text = "►"
+		chevron.TextColor3 = Library.Theme.TextDim
+		chevron.FontFace = Library.Theme.Font
+		chevron.TextSize = (Library.Theme.TextSize or 15) - 3
+		chevron.Rotation = 90
+		chevron.Parent = prow
+		Library:Tag(chevron, { TextColor3 = "TextDim" })
+
+		local pbtn = Instance.new("TextButton")
+		pbtn.Size = UDim2.new(1, -16, 1, 0)
+		pbtn.Position = UDim2.new(0, 16, 0, 0)
+		pbtn.BackgroundTransparency = 1
+		pbtn.AutoButtonColor = false
+		pbtn.Text = group.name
+		pbtn.TextColor3 = Library.Theme.TextBright
+		pbtn.FontFace = Library.Theme.FontMedium or Library.Theme.Font
+		pbtn.TextSize = (Library.Theme.TextSize or 15) - 1
+		pbtn.TextXAlignment = Enum.TextXAlignment.Left
+		pbtn.Parent = prow
+		Library:Tag(pbtn, { TextColor3 = "TextBright" })
+
+		parent.button = pbtn
+		parent.chevron = chevron
+		pbtn.MouseEnter:Connect(function() pbtn.TextColor3 = Library.Theme.Text end)
+		pbtn.MouseLeave:Connect(function() pbtn.TextColor3 = Library.Theme.TextBright end)
+
+		-- children: subtab rows connected to the parent by branch lines
+		for index, childName in ipairs(group.children) do
+			local crow = Instance.new("Frame")
+			crow.Size = UDim2.new(1, 0, 0, 24)
+			crow.BackgroundTransparency = 1
+			crow.LayoutOrder = order; order += 1
+			crow.Parent = sidebar
+			parent.rows[#parent.rows + 1] = crow
+
+			-- tree-view branch indicator: vertical spine + horizontal twig
+			local isLast = index == #group.children
+			local vLine = Instance.new("Frame")
+			vLine.Position = UDim2.new(0, 7, 0, 0)
+			vLine.Size = isLast and UDim2.new(0, 1, 0, 12) or UDim2.new(0, 1, 1, 0)
+			vLine.BackgroundColor3 = Library.Theme.BorderSoft
+			vLine.BorderSizePixel = 0
+			vLine.Parent = crow
+			Library:Tag(vLine, { BackgroundColor3 = "BorderSoft" })
+			local hLine = Instance.new("Frame")
+			hLine.Position = UDim2.new(0, 7, 0, 11)
+			hLine.Size = UDim2.new(0, 10, 0, 1)
+			hLine.BackgroundColor3 = Library.Theme.BorderSoft
+			hLine.BorderSizePixel = 0
+			hLine.Parent = crow
+			Library:Tag(hLine, { BackgroundColor3 = "BorderSoft" })
+
+			local cbtn = Instance.new("TextButton")
+			cbtn.Size = UDim2.new(1, -20, 1, 0)
+			cbtn.Position = UDim2.new(0, 20, 0, 0)
+			cbtn.BackgroundTransparency = 1
+			cbtn.AutoButtonColor = false
+			cbtn.Text = childName
+			cbtn.TextColor3 = Library.Theme.TextDim
+			cbtn.FontFace = Library.Theme.Font
+			cbtn.TextSize = (Library.Theme.TextSize or 15) - 1
+			cbtn.TextXAlignment = Enum.TextXAlignment.Left
+			cbtn.Parent = crow
+
+			-- active marker: accent bar on the left edge, like the library's
+			-- own side tab buttons
+			local bar = Instance.new("Frame")
+			bar.Size = UDim2.new(0, 3, 1, -6)
+			bar.Position = UDim2.new(0, -6, 0, 3)
+			bar.BackgroundColor3 = Library.Theme.Accent
+			bar.BackgroundTransparency = 1
+			bar.BorderSizePixel = 0
+			bar.Parent = cbtn
+			Library:Tag(bar, { BackgroundColor3 = "Accent" })
+
+			cbtn.Activated:Connect(function()
+				SelectReachPage(childName)
+			end)
+			cbtn.MouseEnter:Connect(function()
+				if ActiveReachPage ~= childName then cbtn.TextColor3 = Library.Theme.Text end
+			end)
+			cbtn.MouseLeave:Connect(function()
+				if ActiveReachPage ~= childName then cbtn.TextColor3 = Library.Theme.TextDim end
+			end)
+
+			ReachPages[#ReachPages + 1] = { name = childName, button = cbtn, bar = bar, row = crow }
+		end
+
+		-- breathing room after each group
+		local gap = Instance.new("Frame")
+		gap.Size = UDim2.new(1, 0, 0, 7)
+		gap.BackgroundTransparency = 1
+		gap.LayoutOrder = order; order += 1
+		gap.Parent = sidebar
+
+		pbtn.Activated:Connect(function()
+			parent.expanded = not parent.expanded
+			chevron.Rotation = parent.expanded and 90 or 0
+			for _, r in ipairs(parent.rows) do
+				r.Visible = parent.expanded
 			end
 		end)
-		button.MouseLeave:Connect(function()
-			if page.name ~= ActiveReachPage then
-				button.TextColor3 = Library.Theme.TextDim
-			end
-		end)
+
+		ReachTreeParents[#ReachTreeParents + 1] = parent
 	end
-	return strip
+
+	return contentCol
 end
 
 if UserInputService.TouchEnabled then
 	ReachMainSection = Tabs.Reach:Section("Main", 2)
 	CreateReachTab(ReachMainSection, "Main")
 else
-	MakeSubtabStrip(Tabs.Reach, {
-		{ name = "Shoot" }, { name = "Pass" }, { name = "Long" },
-		{ name = "Tackle" }, { name = "Dribble" }, { name = "Save" },
+	local ReachPageColumn = MakeTreeSidebar(Tabs.Reach, {
+		{ name = "Attacking",  children = { "Shoot", "Long" } },
+		{ name = "Playmaking", children = { "Pass", "Dribble" } },
+		{ name = "Defending",  children = { "Tackle", "Save" } },
 	})
 	ReachShootSection = CreateReachPage(Tabs.Reach, "Shoot")
 	ReachPassSection = CreateReachPage(Tabs.Reach, "Pass")
@@ -802,14 +946,15 @@ else
 	ReachTackleSection = CreateReachPage(Tabs.Reach, "Tackle")
 	ReachDribbleSection = CreateReachPage(Tabs.Reach, "Dribble")
 	ReachSaveSection = CreateReachPage(Tabs.Reach, "Save")
-	ReachPages = {
-		{ name = "Shoot", section = ReachShootSection },
-		{ name = "Pass", section = ReachPassSection },
-		{ name = "Long", section = ReachLongSection },
-		{ name = "Tackle", section = ReachTackleSection },
-		{ name = "Dribble", section = ReachDribbleSection },
-		{ name = "Save", section = ReachSaveSection },
+	local ReachSections = {
+		Shoot = ReachShootSection, Pass = ReachPassSection, Long = ReachLongSection,
+		Tackle = ReachTackleSection, Dribble = ReachDribbleSection, Save = ReachSaveSection,
 	}
+	for _, entry in ipairs(ReachPages) do
+		entry.section = ReachSections[entry.name]
+		-- reparent the move sections into the sidebar's page area
+		entry.section.Container.Parent = ReachPageColumn
+	end
 	SelectReachPage("Shoot")
 end
 
