@@ -51,8 +51,13 @@
 - The preview character now rebuilds automatically on respawn (the old
   script needed a manual "Rebuild Character" press).
 - The B3rnyGuard namecall bypass (B3rnyGuardian report swallow +
-  GetClosestPointOnSurface passthrough) is now a toggle, "B3rnyGuard Bypass"
-  in Miscs -> Utility, saved with configs like everything else.
+  GetClosestPointOnSurface passthrough) runs FIRST: the hook is installed and
+  verified before anything else, and if verification fails the whole script
+  aborts without executing. There is no toggle - it is mandatory.
+- Design pass inspired by Lumen / VVind / Catalyst / Atlanta: deep-black
+  layered palette, a top-right watermark badge (chain.lol | game | fps,
+  toggleable in UI Settings), and CanvasGroup crossfades so reach page
+  switches and tree expand/collapse fade smoothly instead of snapping.
   All other game logic is untouched.
 	- The old "Risky" toggle styling maps onto Facility's "danger" label style.
 	- Old toggle tooltips map onto Facility's Hint ("?" hover).
@@ -66,6 +71,55 @@ if getgenv().gamesense and getgenv().gamesense.loaded then
 	return
 end
 getgenv().gamesense = {loaded = true}
+
+-- ===========================================================================
+-- B3rnyGuard bypass - mandatory, verified BEFORE anything else runs.
+-- The namecall hook swallows the game's "B3rnyGuardian" anti-cheat report on
+-- MainEvent and forces GetClosestPointOnSurface to return the queried point
+-- (hit-distance validation always passes). If the hook cannot be installed,
+-- cannot intercept calls, or breaks namecall passthrough, the whole script
+-- aborts right here: no UI, no features, nothing executes.
+-- ===========================================================================
+do
+	local verified = false
+	local ok, err = pcall(function()
+		assert(type(hookmetamethod) == "function", "hookmetamethod unavailable")
+		assert(type(newcclosure) == "function", "newcclosure unavailable")
+		assert(type(getnamecallmethod) == "function", "getnamecallmethod unavailable")
+		assert(type(checkcaller) == "function", "checkcaller unavailable")
+
+		local intercepted = false
+		local old_namecall
+		old_namecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+			local method = getnamecallmethod()
+			if method == "GetService" and self == game then
+				intercepted = true
+			end
+			if not checkcaller() then
+				if method == "FireServer" and self.Name == "MainEvent" then
+					local arg1 = (select(1, ...))
+					if arg1 == "B3rnyGuardian" then return nil end
+				end
+				if method == "GetClosestPointOnSurface" then
+					return (select(1, ...))
+				end
+			end
+			return old_namecall(self, ...)
+		end))
+		assert(type(old_namecall) == "function", "hookmetamethod did not return the original")
+
+		-- controlled probe: this call travels through the hooked metamethod,
+		-- proving the hook intercepts namecalls AND passes them through intact
+		local probe = game:GetService("Workspace")
+		assert(probe ~= nil, "namecall passthrough broken")
+		assert(intercepted, "namecall hook is not intercepting calls")
+	end)
+	verified = ok
+	if not verified then
+		warn("chain: B3rnyGuard bypass could not be verified (" .. tostring(err) .. ") - script aborted")
+		return
+	end
+end
 
 local Activated = false
 
@@ -140,54 +194,43 @@ local function Notify(info)
 	Library:Notify(info)
 end
 
--- Default theme: the original "chain" palette (dark gray + pink accent, brighter
--- text) is registered as a Facility theme preset named "chain" and applied when the
--- user has not saved a theme of their own yet. It stays editable from the theme
--- editor modal (paintbrush icon in the window footer).
 local THEME_FOLDER = "gamesense-mps"
-local chainThemeReady = false
+-- Full palette redesign (this build): deep-black layered surfaces in the
+-- style of Lumen/VVind - near-black window, subtly lighter cards, quiet
+-- borders, bright text - with the chain pink accent. Applied unconditionally
+-- and saved, so it also upgrades installs that saved the older grey theme.
+local Theme = Library.Theme
+Theme.Window        = Color3.fromRGB(14, 14, 15)
+Theme.WindowBorder  = Color3.fromRGB(38, 38, 42)
+Theme.TopBar        = Color3.fromRGB(18, 18, 19)
+Theme.Section       = Color3.fromRGB(20, 20, 21)
+Theme.SectionBorder = Color3.fromRGB(34, 34, 37)
+Theme.Group         = Color3.fromRGB(24, 24, 25)
+Theme.GroupBorder   = Color3.fromRGB(38, 38, 41)
+Theme.Field         = Color3.fromRGB(29, 29, 31)
+Theme.FieldHover    = Color3.fromRGB(36, 36, 39)
+Theme.Border        = Color3.fromRGB(48, 48, 52)
+Theme.BorderSoft    = Color3.fromRGB(40, 40, 43)
+Theme.PopupBg       = Color3.fromRGB(28, 28, 30)
+Theme.PopupBorder   = Color3.fromRGB(50, 50, 54)
+Theme.Track         = Color3.fromRGB(44, 44, 47)
+Theme.Text          = Color3.fromRGB(232, 232, 236)
+Theme.TextDim       = Color3.fromRGB(152, 153, 161)
+Theme.TextBright    = Color3.fromRGB(250, 250, 252)
+Theme.Accent        = Color3.fromRGB(219, 68, 103)
+Theme.AccentSoft    = Color3.fromRGB(238, 132, 158)
+Theme.AccentDim     = Color3.fromRGB(150, 50, 74)
 if ThemeManager then
-	chainThemeReady = pcall(function()
+	pcall(function()
 		ThemeManager:SetLibrary(Library)
 		ThemeManager:SetFolder(THEME_FOLDER)
-		ThemeManager.Presets.chain = { Bg = Color3.fromRGB(28, 28, 28), Accent = Color3.fromRGB(219, 68, 103) }
+		ThemeManager.Presets.chain = { Bg = Color3.fromRGB(14, 14, 15), Accent = Color3.fromRGB(219, 68, 103) }
 		if not table.find(ThemeManager.Order, "chain") then
 			table.insert(ThemeManager.Order, 1, "chain")
 		end
-		if not ThemeManager:Load() then
-			ThemeManager:Apply("chain")
-			-- nudge the text colors toward the original white-on-dark look
-			local Theme = Library.Theme
-			Theme.Text = Color3.fromRGB(222, 222, 226)
-			Theme.TextDim = Color3.fromRGB(138, 138, 144)
-			Theme.TextBright = Color3.fromRGB(244, 244, 248)
-			ThemeManager:Save()
-		end
+		-- save the full palette (Bg/Accent via the preset, the rest directly)
+		ThemeManager:Save()
 	end)
-end
-if not chainThemeReady then
-	-- fallback palette in case the ThemeManager addon could not be loaded
-	local Theme = Library.Theme
-	Theme.Window = Color3.fromRGB(28, 28, 28)
-	Theme.TopBar = Color3.fromRGB(33, 33, 33)
-	Theme.Section = Color3.fromRGB(31, 31, 31)
-	Theme.Group = Color3.fromRGB(36, 36, 36)
-	Theme.Field = Color3.fromRGB(42, 42, 42)
-	Theme.FieldHover = Color3.fromRGB(50, 50, 50)
-	Theme.PopupBg = Color3.fromRGB(40, 40, 40)
-	Theme.Track = Color3.fromRGB(60, 60, 60)
-	Theme.WindowBorder = Color3.fromRGB(54, 54, 54)
-	Theme.SectionBorder = Color3.fromRGB(48, 48, 48)
-	Theme.GroupBorder = Color3.fromRGB(56, 56, 56)
-	Theme.Border = Color3.fromRGB(62, 62, 62)
-	Theme.BorderSoft = Color3.fromRGB(47, 47, 47)
-	Theme.PopupBorder = Color3.fromRGB(64, 64, 64)
-	Theme.Accent = Color3.fromRGB(219, 68, 103)
-	Theme.AccentSoft = Color3.fromRGB(238, 132, 152)
-	Theme.AccentDim = Color3.fromRGB(146, 45, 68)
-	Theme.Text = Color3.fromRGB(222, 222, 226)
-	Theme.TextDim = Color3.fromRGB(138, 138, 144)
-	Theme.TextBright = Color3.fromRGB(244, 244, 248)
 end
 
 local Window = Library:Window({
@@ -691,29 +734,26 @@ end
 local ReachPages = {}
 local ReachTreeParents = {}
 local ActiveReachPage = nil
+local PAGE_FADE = TweenInfo.new(0.13, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 
 local function SelectReachPage(name)
 	ActiveReachPage = name
 	for _, page in ipairs(ReachPages) do
 		local active = page.name == name
-		-- page the section CARD itself (.Frame, the visible box). Hiding the
-		-- card removes it from the column completely - true paging, no gaps,
-		-- and no leftover title bars (hiding only the inner .Container would
-		-- leave every move's empty card visible)
-		page.section.Frame.Visible = active
+		-- each move's card sits inside its own CanvasGroup; paging toggles
+		-- the GROUP, so the fade covers the entire page (card, titles, every
+		-- element) instead of just the card background
+		page.group.Visible = active
+		if active then
+			page.group.GroupTransparency = 1
+			TweenService:Create(page.group, PAGE_FADE, { GroupTransparency = 0 }):Play()
+		end
 		-- retag so the active child keeps its colour across theme changes,
 		-- the same trick the library uses for its own tab buttons
 		Library:Tag(page.button, { TextColor3 = active and "Accent" or "TextDim" })
 		page.button.TextColor3 = active and Library.Theme.Accent or Library.Theme.TextDim
 		Library:Tag(page.bar, { BackgroundColor3 = "Accent" })
 		page.bar.BackgroundTransparency = active and 0 or 1
-		if active then
-			-- soft fade-in so page switches feel smooth instead of snapping
-			local card = page.section.Frame
-			card.BackgroundTransparency = 0.3
-			TweenService:Create(card, TweenInfo.new(0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-				{ BackgroundTransparency = 0 }):Play()
-		end
 	end
 end
 
@@ -808,6 +848,22 @@ local function MakeTreeSidebar(tab, groups)
 		prow.BackgroundTransparency = 1
 		prow.LayoutOrder = order; order += 1
 		prow.Parent = sidebar
+		-- children of this group render inside a CanvasGroup so expanding
+		-- fades the whole block in (a plain visibility flip looks choppy)
+		local groupCanvas = Instance.new("CanvasGroup")
+		groupCanvas.Name = "ReachGroup_" .. group.name
+		groupCanvas.Size = UDim2.new(1, 0, 0, 0)
+		groupCanvas.AutomaticSize = Enum.AutomaticSize.Y
+		groupCanvas.BackgroundTransparency = 1
+		groupCanvas.BorderSizePixel = 0
+		groupCanvas.LayoutOrder = order; order += 1
+		groupCanvas.Parent = sidebar
+		local groupList = Instance.new("UIListLayout")
+		groupList.SortOrder = Enum.SortOrder.LayoutOrder
+		groupList.Padding = UDim.new(0, 1)
+		groupList.Parent = groupCanvas
+		parent.canvas = groupCanvas
+
 
 		local chevron = Instance.new("TextLabel")
 		chevron.Size = UDim2.new(0, 14, 1, 0)
@@ -843,8 +899,8 @@ local function MakeTreeSidebar(tab, groups)
 			local crow = Instance.new("Frame")
 			crow.Size = UDim2.new(1, 0, 0, 24)
 			crow.BackgroundTransparency = 1
-			crow.LayoutOrder = order; order += 1
-			crow.Parent = sidebar
+			crow.LayoutOrder = index
+			crow.Parent = groupCanvas
 			parent.rows[#parent.rows + 1] = crow
 
 			-- tree-view branch indicator: vertical spine + horizontal twig
@@ -921,14 +977,17 @@ local function MakeTreeSidebar(tab, groups)
 		gap.BackgroundTransparency = 1
 		gap.LayoutOrder = order; order += 1
 		gap.Parent = sidebar
+		order = order + 10
 
 		pbtn.Activated:Connect(function()
 			parent.expanded = not parent.expanded
 			TweenService:Create(chevron,
 				TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
 				{ Rotation = parent.expanded and 90 or 0 }):Play()
-			for _, r in ipairs(parent.rows) do
-				r.Visible = parent.expanded
+			groupCanvas.Visible = parent.expanded
+			if parent.expanded then
+				groupCanvas.GroupTransparency = 1
+				TweenService:Create(groupCanvas, PAGE_FADE, { GroupTransparency = 0 }):Play()
 			end
 		end)
 
@@ -957,10 +1016,19 @@ else
 		Shoot = ReachShootSection, Pass = ReachPassSection, Long = ReachLongSection,
 		Tackle = ReachTackleSection, Dribble = ReachDribbleSection, Save = ReachSaveSection,
 	}
-	for _, entry in ipairs(ReachPages) do
+	for index, entry in ipairs(ReachPages) do
 		entry.section = ReachSections[entry.name]
-		-- reparent the move section CARDS into the sidebar's page area
-		entry.section.Frame.Parent = ReachPageColumn
+		-- each move card sits in its own CanvasGroup (true full-page fades)
+		local pageCanvas = Instance.new("CanvasGroup")
+		pageCanvas.Name = "ReachPage_" .. entry.name
+		pageCanvas.Size = UDim2.new(1, 0, 0, 0)
+		pageCanvas.AutomaticSize = Enum.AutomaticSize.Y
+		pageCanvas.BackgroundTransparency = 1
+		pageCanvas.BorderSizePixel = 0
+		pageCanvas.LayoutOrder = index
+		pageCanvas.Parent = ReachPageColumn
+		entry.section.Frame.Parent = pageCanvas
+		entry.group = pageCanvas
 	end
 	SelectReachPage("Shoot")
 end
@@ -1291,12 +1359,6 @@ PingSpoofGroupbox:Slider({ Flag = "PingSpoofSpike", Text = "Ping Spike", Default
 PingSpoofGroupbox:Slider({ Flag = "PingSpoofHZ", Text = "Ping Refresh Rate", Default = 1, Min = 0.1, Max = 5, Decimals = 1, Step = 0.1 })
 
 local UtilGroupbox = Tabs.Miscs:Section("Utility", 1)
-UtilGroupbox:Toggle({
-	Flag = "B3rnyGuardBypass",
-	Text = "B3rnyGuard Bypass",
-	Default = true,
-	Hint = "Blocks the game's B3rnyGuardian anti-cheat report and forces hit-distance validation (GetClosestPointOnSurface) to always pass.",
-})
 UtilGroupbox:Toggle({ Flag = "AntiAFKToggle", Text = "Anti AFK", Default = true })
 UtilGroupbox:Toggle({ Flag = "AutoRejoinOnErrorToggle", Text = "Auto Rejoin on Kick", Default = false })
 
@@ -1336,6 +1398,9 @@ ConfigGroupbox:Toggle({ Flag = "KeybindMenuOpen", Default = false, Text = "Open 
 ConfigGroupbox:Toggle({ Flag = "ShowCustomCursor", Text = "Custom Cursor", Default = false,
 	Callback = function(Value) Library:SetCursor(Value) end,
 })
+Cb.ShowWatermark = { Flag = "ShowWatermark", Text = "Watermark", Default = true,
+	Hint = "chain.lol badge with the detected game and live FPS, top-right." }
+ConfigGroupbox:Toggle(Cb.ShowWatermark)
 ConfigGroupbox:Dropdown({ Flag = "NotificationSide", Text = "Notification Side", Options = { "Left", "Right" }, Default = "Right",
 	Callback = function(Value)
 		NotifySide = Value
@@ -1544,6 +1609,76 @@ local MatchFontOk, MatchFontResult = pcall(function()
 	return Font.fromEnum(Library.Theme.Font or Enum.Font.Gotham)
 end)
 local MatchFont = MatchFontOk and MatchFontResult or JuraFont
+
+-- watermark: chain.lol badge, top-right, with the detected game + live FPS
+local WatermarkLabel = nil
+local function BuildWatermark()
+	if WatermarkLabel then return end
+	WatermarkLabel = Instance.new("TextLabel")
+	WatermarkLabel.Name = "GS_Watermark"
+	WatermarkLabel.AnchorPoint = Vector2.new(1, 0)
+	WatermarkLabel.Position = UDim2.new(1, -12, 0, 12)
+	WatermarkLabel.AutomaticSize = Enum.AutomaticSize.X
+	WatermarkLabel.Size = UDim2.new(0, 0, 0, 24)
+	WatermarkLabel.BackgroundColor3 = Library.Theme.Section
+	WatermarkLabel.BackgroundTransparency = 0.08
+	WatermarkLabel.BorderSizePixel = 0
+	WatermarkLabel.TextColor3 = Library.Theme.Text
+	WatermarkLabel.FontFace = MatchFont
+	WatermarkLabel.TextSize = 13
+	WatermarkLabel.Text = "chain.lol"
+	WatermarkLabel.TextXAlignment = Enum.TextXAlignment.Left
+	WatermarkLabel.Parent = GS_OVERLAY
+	Library:Tag(WatermarkLabel, { BackgroundColor3 = "Section", TextColor3 = "Text" })
+	local wmPad = Instance.new("UIPadding")
+	wmPad.PaddingLeft = UDim.new(0, 10)
+	wmPad.PaddingRight = UDim.new(0, 10)
+	wmPad.Parent = WatermarkLabel
+	local wmCorner = Instance.new("UICorner")
+	wmCorner.CornerRadius = UDim.new(0, 6)
+	wmCorner.Parent = WatermarkLabel
+	local wmStroke = Instance.new("UIStroke")
+	wmStroke.Thickness = 1
+	wmStroke.Parent = WatermarkLabel
+	Library:Tag(wmStroke, { Color = "BorderSoft" })
+	local wmDot = Instance.new("Frame")
+	wmDot.Size = UDim2.new(0, 6, 0, 6)
+	wmDot.Position = UDim2.new(0, 3, 0.5, -3)
+	wmDot.BackgroundColor3 = Library.Theme.Accent
+	wmDot.BorderSizePixel = 0
+	wmDot.Parent = WatermarkLabel
+	local wmDotCorner = Instance.new("UICorner")
+	wmDotCorner.CornerRadius = UDim.new(1, 0)
+	wmDotCorner.Parent = wmDot
+	Library:Tag(wmDot, { BackgroundColor3 = "Accent" })
+end
+BuildWatermark()
+do
+	local wmFrames, wmAccum, wmFps = 0, 0, 0
+	local wmGame = IS_MMP and "MMP" or (IS_RMF and "RMF" or (IS_VEF and "VEF" or "Unknown"))
+	RunService.Heartbeat:Connect(function(dt)
+		wmFrames = wmFrames + 1
+		wmAccum = wmAccum + dt
+		if wmAccum >= 0.5 then
+			wmFps = math.floor(wmFrames / wmAccum + 0.5)
+			wmFrames, wmAccum = 0, 0
+		end
+		if WatermarkLabel then
+			WatermarkLabel.Visible = Flags.ShowWatermark ~= false
+			-- only touch .Text when it actually changed (re-layout per frame is waste)
+			local text = ("chain.lol  |  %s  |  %d fps"):format(wmGame, wmFps)
+			if WatermarkLabel.Text ~= text then
+				WatermarkLabel.Text = text
+			end
+		end
+	end)
+end
+local function UpdateWatermarkVisibility()
+	if WatermarkLabel then
+		WatermarkLabel.Visible = Flags.ShowWatermark ~= false
+	end
+end
+Cb.ShowWatermark.Callback = UpdateWatermarkVisibility
 
 local FPSLabel = nil
 local function BuildFPSLabel()
@@ -2241,28 +2376,8 @@ local function ApplyBypass()
 end
 pcall(ApplyBypass)
 
--- B3rnyGuard bypass (namecall hook): swallows the game's "B3rnyGuardian"
--- anti-cheat report on MainEvent and forces GetClosestPointOnSurface to
--- return the queried point, so hit-distance validation always passes.
--- Gated live by the "B3rnyGuard Bypass" toggle in Miscs -> Utility.
-pcall(function()
-	local old_namecall
-	old_namecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
-		local method = getnamecallmethod()
-		if not checkcaller() then
-			if Flags.B3rnyGuardBypass ~= false then
-				if method == "FireServer" and self.Name == "MainEvent" then
-					local arg1 = (select(1, ...))
-					if arg1 == "B3rnyGuardian" then return nil end
-				end
-				if method == "GetClosestPointOnSurface" then
-					return (select(1, ...))
-				end
-			end
-		end
-		return old_namecall(self, ...)
-	end))
-end)
+-- (the B3rnyGuard namecall hook lives at the very top of the script now:
+--  it is verified before anything executes and the script aborts without it)
 
 KnuckleWobbleThreads = {}
 if NO_FOLDER then
