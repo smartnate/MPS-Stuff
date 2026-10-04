@@ -51,13 +51,16 @@
 - The preview character now rebuilds automatically on respawn (the old
   script needed a manual "Rebuild Character" press).
 - The B3rnyGuard namecall bypass (B3rnyGuardian report swallow +
-  GetClosestPointOnSurface passthrough) runs FIRST: the hook is installed and
-  verified before anything else, and if verification fails the whole script
-  aborts without executing. There is no toggle - it is mandatory.
-- Design pass inspired by Lumen / VVind / Catalyst / Atlanta: deep-black
-  layered palette, a top-right watermark badge (chain.lol | game | fps,
-  toggleable in UI Settings), and CanvasGroup crossfades so reach page
-  switches and tree expand/collapse fade smoothly instead of snapping.
+  GetClosestPointOnSurface passthrough) runs only in the VEF game, right
+  after game detection and before anything else: the hook is installed and
+  verified there, and if verification fails the whole script aborts without
+  executing. There is no toggle - on VEF it is mandatory, elsewhere it is
+  not installed at all.
+- Design pass inspired by juju/panduh (pure-black window, near-black cards,
+  silver/dim text, live panel lists - see the booster panel in Miscs ->
+  Status), Lumen / VVind / Catalyst / Atlanta (watermark badge with game +
+  live FPS, CanvasGroup crossfades so reach page switches and tree
+  expand/collapse fade smoothly instead of snapping).
   All other game logic is untouched.
 	- The old "Risky" toggle styling maps onto Facility's "danger" label style.
 	- Old toggle tooltips map onto Facility's Hint ("?" hover).
@@ -71,55 +74,6 @@ if getgenv().gamesense and getgenv().gamesense.loaded then
 	return
 end
 getgenv().gamesense = {loaded = true}
-
--- ===========================================================================
--- B3rnyGuard bypass - mandatory, verified BEFORE anything else runs.
--- The namecall hook swallows the game's "B3rnyGuardian" anti-cheat report on
--- MainEvent and forces GetClosestPointOnSurface to return the queried point
--- (hit-distance validation always passes). If the hook cannot be installed,
--- cannot intercept calls, or breaks namecall passthrough, the whole script
--- aborts right here: no UI, no features, nothing executes.
--- ===========================================================================
-do
-	local verified = false
-	local ok, err = pcall(function()
-		assert(type(hookmetamethod) == "function", "hookmetamethod unavailable")
-		assert(type(newcclosure) == "function", "newcclosure unavailable")
-		assert(type(getnamecallmethod) == "function", "getnamecallmethod unavailable")
-		assert(type(checkcaller) == "function", "checkcaller unavailable")
-
-		local intercepted = false
-		local old_namecall
-		old_namecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
-			local method = getnamecallmethod()
-			if method == "GetService" and self == game then
-				intercepted = true
-			end
-			if not checkcaller() then
-				if method == "FireServer" and self.Name == "MainEvent" then
-					local arg1 = (select(1, ...))
-					if arg1 == "B3rnyGuardian" then return nil end
-				end
-				if method == "GetClosestPointOnSurface" then
-					return (select(1, ...))
-				end
-			end
-			return old_namecall(self, ...)
-		end))
-		assert(type(old_namecall) == "function", "hookmetamethod did not return the original")
-
-		-- controlled probe: this call travels through the hooked metamethod,
-		-- proving the hook intercepts namecalls AND passes them through intact
-		local probe = game:GetService("Workspace")
-		assert(probe ~= nil, "namecall passthrough broken")
-		assert(intercepted, "namecall hook is not intercepting calls")
-	end)
-	verified = ok
-	if not verified then
-		warn("chain: B3rnyGuard bypass could not be verified (" .. tostring(err) .. ") - script aborted")
-		return
-	end
-end
 
 local Activated = false
 
@@ -195,28 +149,28 @@ local function Notify(info)
 end
 
 local THEME_FOLDER = "gamesense-mps"
--- Full palette redesign (this build): deep-black layered surfaces in the
--- style of Lumen/VVind - near-black window, subtly lighter cards, quiet
--- borders, bright text - with the chain pink accent. Applied unconditionally
--- and saved, so it also upgrades installs that saved the older grey theme.
+-- Palette: juju/panduh-inspired pure-black design - black window, near-black
+-- cards, quiet dark borders, silver active text and dim inactive text - kept
+-- on the chain pink accent. Applied unconditionally and saved, so it also
+-- upgrades installs that saved an older grey theme.
 local Theme = Library.Theme
-Theme.Window        = Color3.fromRGB(14, 14, 15)
-Theme.WindowBorder  = Color3.fromRGB(38, 38, 42)
-Theme.TopBar        = Color3.fromRGB(18, 18, 19)
-Theme.Section       = Color3.fromRGB(20, 20, 21)
-Theme.SectionBorder = Color3.fromRGB(34, 34, 37)
-Theme.Group         = Color3.fromRGB(24, 24, 25)
-Theme.GroupBorder   = Color3.fromRGB(38, 38, 41)
-Theme.Field         = Color3.fromRGB(29, 29, 31)
-Theme.FieldHover    = Color3.fromRGB(36, 36, 39)
-Theme.Border        = Color3.fromRGB(48, 48, 52)
-Theme.BorderSoft    = Color3.fromRGB(40, 40, 43)
-Theme.PopupBg       = Color3.fromRGB(28, 28, 30)
-Theme.PopupBorder   = Color3.fromRGB(50, 50, 54)
-Theme.Track         = Color3.fromRGB(44, 44, 47)
-Theme.Text          = Color3.fromRGB(232, 232, 236)
-Theme.TextDim       = Color3.fromRGB(152, 153, 161)
-Theme.TextBright    = Color3.fromRGB(250, 250, 252)
+Theme.Window        = Color3.fromRGB(0, 0, 0)
+Theme.WindowBorder  = Color3.fromRGB(24, 25, 24)
+Theme.TopBar        = Color3.fromRGB(6, 6, 6)
+Theme.Section       = Color3.fromRGB(6, 6, 6)
+Theme.SectionBorder = Color3.fromRGB(24, 25, 24)
+Theme.Group         = Color3.fromRGB(10, 10, 10)
+Theme.GroupBorder   = Color3.fromRGB(24, 25, 24)
+Theme.Field         = Color3.fromRGB(16, 16, 16)
+Theme.FieldHover    = Color3.fromRGB(22, 22, 22)
+Theme.Border        = Color3.fromRGB(32, 32, 32)
+Theme.BorderSoft    = Color3.fromRGB(24, 24, 24)
+Theme.PopupBg       = Color3.fromRGB(8, 8, 8)
+Theme.PopupBorder   = Color3.fromRGB(28, 28, 28)
+Theme.Track         = Color3.fromRGB(30, 30, 30)
+Theme.Text          = Color3.fromRGB(197, 197, 197)
+Theme.TextDim       = Color3.fromRGB(75, 72, 72)
+Theme.TextBright    = Color3.fromRGB(230, 230, 230)
 Theme.Accent        = Color3.fromRGB(219, 68, 103)
 Theme.AccentSoft    = Color3.fromRGB(238, 132, 158)
 Theme.AccentDim     = Color3.fromRGB(150, 50, 74)
@@ -224,7 +178,7 @@ if ThemeManager then
 	pcall(function()
 		ThemeManager:SetLibrary(Library)
 		ThemeManager:SetFolder(THEME_FOLDER)
-		ThemeManager.Presets.chain = { Bg = Color3.fromRGB(14, 14, 15), Accent = Color3.fromRGB(219, 68, 103) }
+		ThemeManager.Presets.chain = { Bg = Color3.fromRGB(0, 0, 0), Accent = Color3.fromRGB(219, 68, 103) }
 		if not table.find(ThemeManager.Order, "chain") then
 			table.insert(ThemeManager.Order, 1, "chain")
 		end
@@ -400,6 +354,59 @@ end
 
 if MainModule then
 	pcall(function() MainModuleTable = require(MainModule) end)
+end
+
+-- ===========================================================================
+-- B3rnyGuard bypass - VEF ONLY, mandatory, verified before anything else.
+-- The namecall hook swallows the game's "B3rnyGuardian" anti-cheat report on
+-- MainEvent and forces GetClosestPointOnSurface to return the queried point
+-- (hit-distance validation always passes). It only exists in the VEF game,
+-- so it is only installed there - and if it cannot be installed, cannot
+-- intercept calls, or breaks namecall passthrough, the whole script aborts
+-- right here: no UI, no features, nothing executes.
+-- ===========================================================================
+if IS_VEF then
+	local ok, err = pcall(function()
+		assert(type(hookmetamethod) == "function", "hookmetamethod unavailable")
+		assert(type(newcclosure) == "function", "newcclosure unavailable")
+		assert(type(getnamecallmethod) == "function", "getnamecallmethod unavailable")
+		assert(type(checkcaller) == "function", "checkcaller unavailable")
+
+		local intercepted = false
+		local old_namecall
+		old_namecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+			local method = getnamecallmethod()
+			if method == "GetService" and self == game then
+				intercepted = true
+			end
+			if not checkcaller() then
+				if method == "FireServer" and self.Name == "MainEvent" then
+					local arg1 = (select(1, ...))
+					if arg1 == "B3rnyGuardian" then return nil end
+				end
+				if method == "GetClosestPointOnSurface" then
+					return (select(1, ...))
+				end
+			end
+			return old_namecall(self, ...)
+		end))
+		assert(type(old_namecall) == "function", "hookmetamethod did not return the original")
+
+		-- controlled probe: this call travels through the hooked metamethod,
+		-- proving the hook intercepts namecalls AND passes them through intact
+		local probe = game:GetService("Workspace")
+		assert(probe ~= nil, "namecall passthrough broken")
+		assert(intercepted, "namecall hook is not intercepting calls")
+	end)
+	if not ok then
+		warn("chain: B3rnyGuard bypass could not be verified (" .. tostring(err) .. ") - script aborted")
+		-- tear down everything built so far (the window is already up by now)
+		-- and clear the re-execution guard so a retry after fixing the
+		-- executor actually works
+		getgenv().gamesense.loaded = false
+		pcall(function() Library:Destroy() end)
+		return
+	end
 end
 
 if IS_MMP then
@@ -1369,6 +1376,10 @@ StatusBox:Label(gameLabelNow, { Style = "bright" })
 StatusBox:Label("ball detection", { Style = "dim" })
 StatusBox:Label(NO_FOLDER and "Workspace" or "Folder", { Style = "bright" })
 
+-- panduh-style panel list: live view of every booster's armed state
+-- (updated whenever a booster is armed or disarmed, not on a timer)
+UI.BoosterPanel = StatusBox:Table({ Columns = { "booster", "state" }, AlignRight = true })
+
 local PerfGroupbox = Tabs.Miscs:Section("Performance", 2)
 Cb.LowGraphicsToggle = { Flag = "LowGraphicsToggle", Text = "Low Graphics Mode", Default = false }
 PerfGroupbox:Toggle(Cb.LowGraphicsToggle)
@@ -1934,11 +1945,29 @@ local function DestroyLabel(boosterName, delay)
 	end)
 end
 
+local function RefreshBoosterPanel()
+	if not (UI.BoosterPanel and UI.BoosterPanel.SetRows) then return end
+	local rows = {}
+	-- display names inlined (BOOSTER_DISPLAY is declared further down, so a
+	-- closure here could not capture it)
+	local panel = {
+		{ "PowerShot", "PowerShot" }, { "Curve", "Curve" },
+		{ "Knuckle", "Knuckleball" }, { "SpinRot", "Spin Rotation" },
+	}
+	for _, entry in ipairs(panel) do
+		rows[#rows + 1] = { entry[2], ArmedBoosters[entry[1]] and "armed" or "idle" }
+	end
+	UI.BoosterPanel:SetRows(rows)
+end
+RefreshBoosterPanel()
+
 local function ShowApplied(boosterName, displayText)
 	CreateLabelFrame(boosterName, "[+] Applied "..displayText, Color3.fromRGB(90, 220, 130), 1)
+	RefreshBoosterPanel()
 end
 
 local function ShowRemoved(boosterName, displayText)
+	RefreshBoosterPanel()
 	local entry = BoosterLabels[boosterName]
 	if entry and entry.autoHideThread then
 		task.cancel(entry.autoHideThread)
